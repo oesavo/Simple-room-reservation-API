@@ -1037,3 +1037,570 @@ Add a README with example curl commands and sample responses.
 Convert to a small app layout (app.js/server.js) and add linting (ESLint).
 Add schema validation (zod/Joi) to improve error messages consistency.
 Which of those would you like me to do next?
+
+
+You said:
+I want to change index.js so that only server related features remain in it and app features are moved to a new file called app.js.
+
+
+Copilot said: 
+Here are the two updated files. app.js
+Here are the two updated files. app.js contains the Express app, routes, middleware, data and helpers. index.js now only contains server/startup logic and re-exports the app + resetData so existing tests keep working.
+
+app.js
+v1
+// app.js
+// Express application, routes, in-memory data and helpers for Room Reservations API v1
+// - exported: app, resetData
+
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(morgan('common'));
+
+// In-memory data
+const rooms = [];
+let nextReservationId = 1;
+
+function initRooms() {
+  rooms.length = 0;
+  for (let i = 0; i < 10; i++) {
+    rooms.push({
+      id: i + 1,
+      name: `Room ${i + 1}`,
+      reservations: [] // { id, startMs, endMs, startIso, endIso, createdAt }
+    });
+  }
+  nextReservationId = 1;
+}
+
+// Initialize once
+initRooms();
+
+// Helpers
+
+// Parse ISO/RFC3339 string -> ms since epoch, or NaN if invalid
+function parseIsoToMs(isoString) {
+  if (typeof isoString !== 'string') return NaN;
+  const ms = Date.parse(isoString);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+// Normalize milliseconds to minute precision by truncating seconds+ms
+function normalizeToMinute(ms) {
+  return Math.floor(ms / 60000) * 60000;
+}
+
+// Check interval validity (numbers, end > start)
+function isValidInterval(startMs, endMs) {
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+}
+
+// Check if start is in the past (compared at minute precision)
+function isInPast(startMs) {
+  const nowRounded = normalizeToMinute(Date.now());
+  return startMs < nowRounded;
+}
+
+// Overlap check for half-open intervals [start, end)
+function intervalsOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+// Middleware: validate room exists and attach room to req.room
+function loadRoom(req, res, next) {
+  const roomId = Number(req.params.roomId);
+  if (!Number.isFinite(roomId) || roomId < 1 || roomId > rooms.length) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  const room = rooms.find(r => r.id === roomId);
+  req.room = room;
+  next();
+}
+
+// API root / version root
+app.get('/', (req, res) => {
+  res.json({ service: 'room-reservations', version: 'v1', api_base: '/api/v1' });
+});
+
+// List reservations for a room
+app.get('/api/v1/rooms/:roomId/reservations', loadRoom, (req, res) => {
+  const list = req.room.reservations
+    .slice()
+    .sort((a, b) => a.startMs - b.startMs)
+    .map(r => ({
+      id: r.id,
+      start: r.startIso,
+      end: r.endIso,
+      createdAt: r.createdAt
+    }));
+  res.json({ roomId: req.room.id, reservations: list });
+});
+
+// Create a reservation
+// Body: { "start": "2026-01-24T15:00:00Z", "end": "2026-01-24T16:00:00Z" }
+app.post('/api/v1/rooms/:roomId/reservations', loadRoom, (req, res) => {
+  const { start, end } = req.body || {};
+
+  if (!start || !end) {
+    return res.status(400).json({ error: 'Request body must include "start" and "end" RFC3339 strings' });
+  }
+
+  const rawStartMs = parseIsoToMs(start);
+  const rawEndMs = parseIsoToMs(end);
+
+  if (!isValidInterval(rawStartMs, rawEndMs)) {
+    return res.status(400).json({ error: 'Invalid times: ensure "start" and "end" are valid RFC3339 datetimes and end > start' });
+  }
+
+  // Normalize to minute precision (truncate seconds + ms)
+  const startMs = normalizeToMinute(rawStartMs);
+  const endMs = normalizeToMinute(rawEndMs);
+
+  if (!isValidInterval(startMs, endMs)) {
+    // This can happen if both times fall in same minute or normalization made them equal/invalid
+    return res.status(400).json({ error: 'Invalid interval after normalization: end must be after start (at minute precision)' });
+  }
+
+  if (isInPast(startMs)) {
+    return res.status(400).json({ error: 'Reservation start time is in the past' });
+  }
+
+  // Overlap check against existing reservations for this room
+  const conflict = req.room.reservations.find(r => intervalsOverlap(startMs, endMs, r.startMs, r.endMs));
+  if (conflict) {
+    return res.status(409).json({
+      error: 'Time conflict with existing reservation',
+      conflict: {
+        id: conflict.id,
+        start: conflict.startIso,
+        end: conflict.endIso
+      }
+    });
+  }
+
+  const reservation = {
+    id: nextReservationId++,
+    startMs,
+    endMs,
+    startIso: new Date(startMs).toISOString(),
+    endIso: new Date(endMs).toISOString(),
+    createdAt: new Date().toISOString()
+  };
+
+  req.room.reservations.push(reservation);
+
+  res.status(201).json({
+    message: 'Reservation created',
+    roomId: req.room.id,
+    reservation: {
+      id: reservation.id,
+      start: reservation.startIso,
+      end: reservation.endIso,
+      createdAt: reservation.createdAt
+    }
+  });
+});
+
+// Delete a reservation by id
+app.delete('/api/v1/rooms/:roomId/reservations/:reservationId', loadRoom, (req, res) => {
+  const reservationId = Number(req.params.reservationId);
+  if (!Number.isFinite(reservationId)) {
+    return res.status(400).json({ error: 'Invalid reservation id' });
+  }
+
+  const idx = req.room.reservations.findIndex(r => r.id === reservationId);
+  if (idx === -1) {
+    return res.status(404).json({ error: 'Reservation not found' });
+  }
+
+  const [deleted] = req.room.reservations.splice(idx, 1);
+  res.json({
+    message: 'Reservation deleted',
+    roomId: req.room.id,
+    reservation: {
+      id: deleted.id,
+      start: deleted.startIso,
+      end: deleted.endIso,
+      createdAt: deleted.createdAt
+    }
+  });
+});
+
+// 404 for unknown API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
+
+// Generic error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err && err.stack ? err.stack : err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Helper to reset data for tests or development
+function resetData() {
+  initRooms();
+}
+
+module.exports = { app, resetData };
+
+index.js
+v4
+// index.js
+// Server startup (only server related features)
+// - imports app from ./app
+// - starts listening only when run directly
+// - re-exports app and resetData for tests
+
+const { app, resetData } = require('./app');
+
+const PORT = process.env.PORT || 3000;
+
+// Start server when run directly: `node index.js`
+// When required (e.g. tests), this will NOT start the server.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Room reservations API v1 listening on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { app, resetData };s
+
+Notes and next steps
+
+Replace your current index.js contents with the new index.js above and add the new app.js file.
+No changes are required to tests that import from index.js; index.js still exports { app, resetData }.
+Start server for development with npm start or npm run dev as before. Tests will require the module without starting the server.
+If you want, I can:
+Move tests to import directly from app.js (optional).
+Add a small server.js instead of index.js if you prefer different naming.
+Provide a README showing the new layout and how to run tests.
+
+
+You said: 
+Next I want to change app.js so
+Next I want to change app.js so that the REST functions like post, get and delete reservations are moved to their own file, which app.js then uses. How should I go about this?
+
+
+Copilot said: 
+Good plan — splitting routes into their
+Good plan — splitting routes into their own file keeps app.js focused on wiring and middleware and makes the code easier to test and evolve.
+
+What I'll give you
+
+A small store module (store.js) that holds the in-memory rooms and reset function.
+A routes file (routes/reservations.js) that contains the GET / POST / DELETE handlers.
+An updated app.js that wires middleware and mounts the router.
+(index.js remains the server entry you already have — I include it for completeness.)
+Drop these files into your project root (create a routes/ folder for the routes file). The behavior is unchanged; only the responsibilities are separated.
+
+Files
+
+store.js
+// store.js
+// In-memory data store and helpers for tests/dev reset
+
+const rooms = [];
+let nextReservationId = 1;
+
+function initRooms() {
+  rooms.length = 0;
+  for (let i = 0; i < 10; i++) {
+    rooms.push({
+      id: i + 1,
+      name: `Room ${i + 1}`,
+      reservations: [] // { id, startMs, endMs, startIso, endIso, createdAt }
+    });
+  }
+  nextReservationId = 1;
+}
+
+// initialize on load
+initRooms();
+
+function resetData() {
+  initRooms();
+}
+
+function getRoomById(roomId) {
+  return rooms.find(r => r.id === Number(roomId));
+}
+
+function addReservationToRoom(room, reservation) {
+  room.reservations.push(reservation);
+}
+
+function removeReservationFromRoom(room, reservationId) {
+  const idx = room.reservations.findIndex(r => r.id === Number(reservationId));
+  if (idx === -1) return null;
+  return room.reservations.splice(idx, 1)[0];
+}
+
+function getNextReservationId() {
+  return nextReservationId++;
+}
+
+module.exports = {
+  rooms,
+  resetData,
+  getRoomById,
+  addReservationToRoom,
+  removeReservationFromRoom,
+  getNextReservationId
+};
+
+routes/reservations.js
+// routes/reservations.js
+// Router for room reservation endpoints
+// Mounted by app.js at `/api/v1`
+
+const express = require('express');
+const router = express.Router();
+
+const {
+  getRoomById,
+  addReservationToRoom,
+  removeReservationFromRoom,
+  getNextReservationId
+} = require('../store');
+
+// Helpers (kept local to routing logic)
+
+// Parse ISO/RFC3339 string -> ms since epoch, or NaN if invalid
+function parseIsoToMs(isoString) {
+  if (typeof isoString !== 'string') return NaN;
+  const ms = Date.parse(isoString);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+// Normalize milliseconds to minute precision by truncating seconds+ms
+function normalizeToMinute(ms) {
+  return Math.floor(ms / 60000) * 60000;
+}
+
+// Check interval validity (numbers, end > start)
+function isValidInterval(startMs, endMs) {
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+}
+
+// Check if start is in the past (compared at minute precision)
+function isInPast(startMs) {
+  const nowRounded = normalizeToMinute(Date.now());
+  return startMs < nowRounded;
+}
+
+// Overlap check for half-open intervals [start, end)
+function intervalsOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+// Middleware: validate room exists and attach room to req.room
+function loadRoom(req, res, next) {
+  const roomId = Number(req.params.roomId);
+  if (!Number.isFinite(roomId)) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+  const room = getRoomById(roomId);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  req.room = room;
+  next();
+}
+
+// List reservations for a room
+// GET /rooms/:roomId/reservations
+router.get('/rooms/:roomId/reservations', loadRoom, (req, res) => {
+  const list = req.room.reservations
+    .slice()
+    .sort((a, b) => a.startMs - b.startMs)
+    .map(r => ({
+      id: r.id,
+      start: r.startIso,
+      end: r.endIso,
+      createdAt: r.createdAt
+    }));
+  res.json({ roomId: req.room.id, reservations: list });
+});
+
+// Create a reservation
+// POST /rooms/:roomId/reservations
+// Body: { "start": "2026-01-24T15:00:00Z", "end": "2026-01-24T16:00:00Z" }
+router.post('/rooms/:roomId/reservations', loadRoom, (req, res) => {
+  const { start, end } = req.body || {};
+
+  if (!start || !end) {
+    return res.status(400).json({ error: 'Request body must include "start" and "end" RFC3339 strings' });
+  }
+
+  const rawStartMs = parseIsoToMs(start);
+  const rawEndMs = parseIsoToMs(end);
+
+  if (!isValidInterval(rawStartMs, rawEndMs)) {
+    return res.status(400).json({ error: 'Invalid times: ensure "start" and "end" are valid RFC3339 datetimes and end > start' });
+  }
+
+  // Normalize to minute precision (truncate seconds + ms)
+  const startMs = normalizeToMinute(rawStartMs);
+  const endMs = normalizeToMinute(rawEndMs);
+
+  if (!isValidInterval(startMs, endMs)) {
+    return res.status(400).json({ error: 'Invalid interval after normalization: end must be after start (at minute precision)' });
+  }
+
+  if (isInPast(startMs)) {
+    return res.status(400).json({ error: 'Reservation start time is in the past' });
+  }
+
+  // Overlap check against existing reservations for this room
+  const conflict = req.room.reservations.find(r => intervalsOverlap(startMs, endMs, r.startMs, r.endMs));
+  if (conflict) {
+    return res.status(409).json({
+      error: 'Time conflict with existing reservation',
+      conflict: {
+        id: conflict.id,
+        start: conflict.startIso,
+        end: conflict.endIso
+      }
+    });
+  }
+
+  const reservation = {
+    id: getNextReservationId(),
+    startMs,
+    endMs,
+    startIso: new Date(startMs).toISOString(),
+    endIso: new Date(endMs).toISOString(),
+    createdAt: new Date().toISOString()
+  };
+
+  addReservationToRoom(req.room, reservation);
+
+  res.status(201).json({
+    message: 'Reservation created',
+    roomId: req.room.id,
+    reservation: {
+      id: reservation.id,
+      start: reservation.startIso,
+      end: reservation.endIso,
+      createdAt: reservation.createdAt
+    }
+  });
+});
+
+// Delete a reservation by id
+// DELETE /rooms/:roomId/reservations/:reservationId
+router.delete('/rooms/:roomId/reservations/:reservationId', loadRoom, (req, res) => {
+  const reservationId = Number(req.params.reservationId);
+  if (!Number.isFinite(reservationId)) {
+    return res.status(400).json({ error: 'Invalid reservation id' });
+  }
+
+  const deleted = removeReservationFromRoom(req.room, reservationId);
+  if (!deleted) {
+    return res.status(404).json({ error: 'Reservation not found' });
+  }
+
+  res.json({
+    message: 'Reservation deleted',
+    roomId: req.room.id,
+    reservation: {
+      id: deleted.id,
+      start: deleted.startIso,
+      end: deleted.endIso,
+      createdAt: deleted.createdAt
+    }
+  });
+});
+
+module.exports = router;
+
+app.js
+v2
+// app.js
+// Express application wiring: middleware, mounting routes, exports app + resetData
+
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+
+const reservationsRouter = require('./routes/reservations');
+const { resetData } = require('./store');
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+app.use(morgan('common'));
+
+// Root info
+app.get('/', (req, res) => {
+  res.json({ service: 'room-reservations', version: 'v1', api_base: '/api/v1' });
+});
+
+// Mount reservation routes under /api/v1
+app.use('/api/v1', reservationsRouter);
+
+// 404 for unknown API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
+
+// Generic error handler
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err && err.stack ? err.stack : err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+module.exports = { app, resetData };
+
+index.js
+v5
+// index.js
+// Server startup (only server related features)
+// - imports app from ./app
+// - starts listening only when run directly
+// - re-exports app and resetData for tests
+
+const { app, resetData } = require('./app');
+
+const PORT = process.env.PORT || 3000;
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Room reservations API v1 listening on http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { app, resetData };
+
+Instructions / Steps to implement
+
+Create a new file store.js in project root and paste the first block.
+Create a new folder routes/ and add routes/reservations.js with the router code.
+Replace your current app.js with the provided app.js code (or update it to require the new router).
+Keep index.js as shown (or replace your current version with the provided one).
+Run your tests (they should still work since index.js exports resetData and app as before):
+npm test
+Start the server in development:
+npm run dev
+or npm start
+Why this structure
+
+store.js centralizes in-memory data and reset logic so tests can reset state reliably.
+routes/reservations.js isolates request handlers and routing concerns.
+app.js focuses on middleware and mounting routers.
+index.js is strictly the process entry point (starts the server only when executed directly), so tests can import app without starting the HTTP server.
+Next options you might want
+
+Move the route helper functions (parsing/validation) into a shared utils file if multiple routers need them.
+Add unit tests for the route helpers separately.
+Add more routers (e.g., /rooms endpoints) and mount them under /api/v1.
+Add TypeScript and split types for the store and route contracts.
+Want me to:
+
+Update the test file paths or show a small test demonstrating the new layout?
+Move the time/validation helpers to a shared module? Which would you like next?
