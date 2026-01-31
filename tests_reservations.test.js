@@ -2,9 +2,7 @@ const request = require('supertest');
 const { app, resetData } = require('./index');
 
 // Helper to normalize to minute and produce ISO strings with second offsets
-function normalizeToMinute(ms) {
-  return Math.floor(ms / 60000) * 60000;
-}
+const {normalizeToMinute} = require('./utils/time_helpers')
 
 beforeEach(() => {
   resetData();
