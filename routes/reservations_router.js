@@ -26,7 +26,7 @@ const {
 function loadRoom(req, res, next) {
   const roomId = Number(req.params.roomId);
   if (!Number.isFinite(roomId)) {
-    return res.status(404).json({ error: 'Room not found' });
+    return res.status(400).json({ error: 'Room must be a number between 1-10' });
   }
   const room = getRoomById(roomId);
   if (!room) return res.status(404).json({ error: 'Room not found' });
