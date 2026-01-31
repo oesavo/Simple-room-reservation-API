@@ -63,7 +63,7 @@ router.post('/rooms/:roomId/reservations', loadRoom, (req, res) => {
   const rawEndMs = parseIsoToMs(end);
 
   if (!isValidInterval(rawStartMs, rawEndMs)) {
-    return res.status(400).json({ error: 'Invalid times: ensure "start" and "end" are valid RFC3339 datetimes and end > start' });
+    return res.status(400).json({ error: 'Invalid times: ensure "start" and "end" are valid RFC3339 datetimes and end must be after start' });
   }
 
   // Normalize to minute precision (truncate seconds + ms)
