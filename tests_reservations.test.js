@@ -71,7 +71,7 @@ describe('Room reservations - POST /api/v1/rooms/:roomId/reservations (validatio
       .set('Accept', 'application/json');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/start time is in the past/);
+    expect(res.body.error).toMatch(/start time in UTC is in the past/);
   });
 
   test('normalization to minute can make interval invalid -> 400', async () => {

@@ -75,7 +75,7 @@ router.post('/rooms/:roomId/reservations', loadRoom, (req, res) => {
   }
 
   if (isInPast(startMs)) {
-    return res.status(400).json({ error: 'Reservation start time is in the past' });
+    return res.status(400).json({ error: 'Reservation start time in UTC is in the past' });
   }
 
   // Overlap check against existing reservations for this room
