@@ -1,0 +1,4 @@
+POST http://localhost:3000/api/v1/rooms/1/reservations
+content-type: application/json
+
+{ "start": "2026-01-31T23:35:00Z", "end": "2026-02-01T23:50:00Z" }

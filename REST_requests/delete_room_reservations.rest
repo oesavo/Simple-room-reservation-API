@@ -1,0 +1,1 @@
+DELETE http://localhost:3000/api/v1/rooms/1/reservations/1
