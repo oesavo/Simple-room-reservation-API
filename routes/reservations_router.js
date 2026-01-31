@@ -13,6 +13,9 @@ const {
   getNextReservationId
 } = require('../in-memory_database/room_reservations_storage');
 
+//Factory for creating a new reservation
+const { createReservation } = require('../utils/reservation');
+
 //Helper functions for parsing ISO time and validating if times follow rules
 const {
   parseIsoToMs,
@@ -91,15 +94,8 @@ router.post('/rooms/:roomId/reservations', loadRoom, (req, res) => {
     });
   }
 
-  const reservation = {
-    id: getNextReservationId(),
-    startMs,
-    endMs,
-    startIso: new Date(startMs).toISOString(),
-    endIso: new Date(endMs).toISOString(),
-    createdAt: new Date().toISOString()
-  };
-
+  // Create a new reservation using factory
+  const reservation = createReservation(getNextReservationId(), startMs, endMs);
   addReservationToRoom(req.room, reservation);
 
   res.status(201).json({
