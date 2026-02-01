@@ -139,4 +139,17 @@ describe('Room reservations - POST /api/v1/rooms/:roomId/reservations (validatio
 
     expect(r2.status).toBe(201);
   });
+
+  test('reservation cannot be over 12 hours long -> (400)', async () => {
+    const start = new Date(Date.now() + 5 * 60000).toISOString(); // +5 minutes
+    const end = new Date(Date.now() + 13 * 3600000).toISOString(); // +13 hours
+
+    const res = await request(app)
+      .post('/api/v1/rooms/1/reservations')
+      .send({ start, end })
+      .set('Accept', 'application/json');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/length exceeds the maximum of 12 hours/);
+  });
 });

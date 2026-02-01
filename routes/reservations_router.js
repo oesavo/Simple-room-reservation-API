@@ -22,7 +22,8 @@ const {
   normalizeToMinute,
   isValidInterval,
   isInPast,
-  intervalsOverlap
+  intervalsOverlap,
+  isTooLong
 } = require('../utils/time_helpers');
 
 // Middleware: validate room exists and attach room to req.room
@@ -79,6 +80,10 @@ router.post('/rooms/:roomId/reservations', loadRoom, (req, res) => {
 
   if (isInPast(startMs)) {
     return res.status(400).json({ error: 'Reservation start time in UTC is in the past' });
+  }
+
+  if (isTooLong(startMs, endMs)) {
+    return res.status(400).json({ error: 'Reservation length exceeds the maximum of 12 hours'})
   }
 
   // Overlap check against existing reservations for this room

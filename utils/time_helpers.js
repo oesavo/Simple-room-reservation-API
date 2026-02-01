@@ -29,10 +29,16 @@ function intervalsOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && bStart < aEnd;
 }
 
+// Check if reservation is over 12 hours long to prevent reservations that last for days
+function isTooLong(startMs, endMs) {
+  return ((endMs - startMs) > 12 * 3600000 )
+}
+
 module.exports = {
     parseIsoToMs,
     normalizeToMinute,
     isValidInterval,
     isInPast,
-    intervalsOverlap
+    intervalsOverlap,
+    isTooLong
 };
