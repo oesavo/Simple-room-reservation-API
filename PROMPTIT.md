@@ -1,8 +1,8 @@
-You said:
+## You said:
 Hey how should I start making a simple API with JavaScript?
 
 
-Copilot said:
+## Copilot said:
 Nice — building a simple API with JavaScript is a great way to learn backend basics. Below is a short, practical guide that walks you through a minimal REST API using Node.js + Express, how to run it, test it, and next steps you can take.
 
 What I'll do for you now
@@ -163,11 +163,11 @@ Provide Dockerfile and production tips.
 Which of those would you like next?
 
 
-You said:
+## You said:
 The API is for reserving rooms for a time. I need the in-memory database to be 10 rooms where I can add reserved times instead of items. How should I format the times, if I want the reservations to have a start time and an end time, and I want the reservations to be easily comparable, so I can prevent them from overlapping, reservation end time being before the start time or reservations being made to the past?
 
 
-Copilot said:
+## Copilot said:
 Good choice — keep times in a standard text format for input (easy for humans/clients) and convert to a canonical numeric form for storage/comparison. Below I cover the format, the validation rules, the overlap logic (with explanation), and a ready-to-use Express example that creates 10 rooms in-memory and lets you add reservations with proper checks.
 
 Recommended time format
@@ -321,7 +321,7 @@ Show how to implement overlap protection using PostgreSQL exclusion constraints 
 Which of those would you like next?
 
 
-You said:
+## You said:
 I need you to write the simple API for room reservations in JavaScript using Node.js. The project can be built with just the basic dependencies needed to make this simple API work. The API should be versioned to prevent new features breaking the old API in the future and the current version is V1. The features of the API is adding a reservation for a room using POST, deleting a reservation using DELETE and listing all of the reservations for a selected room using GET. 
 
 The system will have 10 reservable rooms as a start. These rooms can be stored in an in-memory database for the time being. Each room has its own reservations and these reservations should have a start time and an end time that are accepted in RFC 3339 format and stored internally as integer milliseconds so they are easy to compare. The seconds should be rounded to zero to avoid millisecond mismatches. We can assume the API users aren't coming from different time zones. 
@@ -331,7 +331,7 @@ The start and end times for a reservation need to be validated that they're in t
 Can you give me the package.json and index,js files for this project and then give me the next steps to install and develop this project?
 
 
-Copilot said:
+## Copilot said:
 I've created a minimal Node.js + Express API that implements your requirements:
 
 10 in-memory rooms (ids 1–10), each with its own reservations
@@ -598,13 +598,13 @@ Add tests for the overlap logic and minute-normalization behavior.
 Convert the project to TypeScript. Which of those would you like next?
 
 
-You said:
+## You said:
 Next add logging to the room reservation API using morgan. You can use the common log output format for this. 
 
 After that I'd like you to write tests for the room reservation API using Jest and supertest. These tests should test that the validation rules for creating a reservation work as intended.
 
 
-Copilot said:
+## Copilot said:
 package.json
 v3
 {
@@ -1039,11 +1039,11 @@ Add schema validation (zod/Joi) to improve error messages consistency.
 Which of those would you like me to do next?
 
 
-You said:
+## You said:
 I want to change index.js so that only server related features remain in it and app features are moved to a new file called app.js.
 
 
-Copilot said: 
+## Copilot said: 
 Here are the two updated files. app.js
 Here are the two updated files. app.js contains the Express app, routes, middleware, data and helpers. index.js now only contains server/startup logic and re-exports the app + resetData so existing tests keep working.
 
@@ -1282,13 +1282,11 @@ Add a small server.js instead of index.js if you prefer different naming.
 Provide a README showing the new layout and how to run tests.
 
 
-You said: 
-Next I want to change app.js so
+## You said: 
 Next I want to change app.js so that the REST functions like post, get and delete reservations are moved to their own file, which app.js then uses. How should I go about this?
 
 
-Copilot said: 
-Good plan — splitting routes into their
+## Copilot said: 
 Good plan — splitting routes into their own file keeps app.js focused on wiring and middleware and makes the code easier to test and evolve.
 
 What I'll give you
@@ -1604,3 +1602,457 @@ Want me to:
 
 Update the test file paths or show a small test demonstrating the new layout?
 Move the time/validation helpers to a shared module? Which would you like next?
+
+## You said:
+Here is the latest version of the project. Can you check it for any auggestions on how to improve the code logic, code readability, error handling or code structure?
+
+
+## Copilot said:
+Thanks — I looked over the project layout and code you shared (store.js, routes/reservations.js, models/reservation.js, app.js, index.js and tests). The design is already clear and practical for a small in-memory prototype. Below I give a prioritized set of concrete suggestions to improve logic, readability, error handling and structure, with rationale and small example files you can drop in to get started.
+
+Summary of high-level suggestions (prioritized)
+
+Centralize time parsing / validation utilities into a single module so they can be unit-tested and reused.
+Introduce a small, consistent error-handling layer (custom errors + centralized error middleware) instead of scattered status/json returns.
+Add a tiny async handler utility (or use express-async-errors) to avoid try/catch repetition if you later add async code.
+Add explicit request validation (zod or Joi) for clear error messages and safer inputs.
+Export and unit-test helper functions (parsing, overlap logic) separately — add unit tests for those.
+Improve ID generation or use UUIDs for safety and test determinism.
+Add security and operational middleware for production readiness (helmet, express-rate-limit, body size limits).
+Document the API surface (OpenAPI/Swagger) and add more tests (GET and DELETE, edge-cases, concurrency).
+Consider structure changes for scale: sorted reservations, faster overlap checks, and DB-backed persistence (Postgres with exclusion constraints) for production.
+Why these and how they help
+
+Central time utilities: keeps date logic in one place and makes normalization/rounding decisions explicit and testable.
+Centralized errors: easier to return consistent machine-friendly error shapes (e.g., { code, message, details }) and map thrown errors to HTTP statuses.
+Validation schemata: prevents accidental invalid payloads and gives clearer client errors.
+Small async wrapper: future-proofs handlers so you don’t forget to catch rejected promises when handlers become async.
+Tests for helpers: overlap logic and normalization have many edge cases — unit tests catch regressions faster.
+Security middlewares: simple to add, avoids creating an unsafe default when you push to staging.
+Concrete code examples Below are small, focused modules you can add. They are intentionally minimal so you can drop them in and adapt.
+
+1. utils/time.js — centralize parsing, normalization, and overlap check
+utils/time.js
+// utils/time.js
+// Central time helpers: parse RFC3339 -> ms, normalize to minute, interval checks.
+
+function parseRfc3339ToMs(value) {
+  if (typeof value !== 'string') return NaN;
+  // Date.parse accepts ISO/RFC3339-like strings; you can replace with a stricter parser (Luxon) later.
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+// Truncate to minute precision (floor). Documented behavior: truncation (not rounding).
+function truncateToMinute(ms) {
+  return Math.floor(ms / 60000) * 60000;
+}
+
+function isValidInterval(startMs, endMs) {
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs;
+}
+
+// Interval overlap for half-open intervals [start, end)
+function intervalsOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+// isInPast using minute-truncation to be consistent with storage behavior.
+function isInPastAtMinute(startMs, nowMs = Date.now()) {
+  const nowRounded = truncateToMinute(nowMs);
+  return startMs < nowRounded;
+}
+
+module.exports = {
+  parseRfc3339ToMs,
+  truncateToMinute,
+  isValidInterval,
+  intervalsOverlap,
+  isInPastAtMinute
+};
+
+2. errors/HttpError.js — small custom error class to standardize error shape
+errors/HttpError.js
+// errors/HttpError.js
+class HttpError extends Error {
+  constructor(status = 500, code = 'INTERNAL_ERROR', message = 'Internal server error', details = null) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+module.exports = HttpError;
+
+3. middleware/errorHandler.js — single place to format responses
+middleware/errorHandler.js
+// middleware/asyncHandler.js
+module.exports = fn => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+4. middleware/asyncHandler.js — small helper to wrap route handlers (optional)
+middleware/asyncHandler.js
+// middleware/asyncHandler.js
+module.exports = fn => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+5. validators/reservation.js — input validation using zod (optional dependency) If you want machine-checked and user-friendly validation messages, add zod to devDependencies and use this validator in routes.
+validators/reservation.js
+// validators/reservation.js
+const { z } = require('zod');
+
+const reservationSchema = z.object({
+  start: z.string().min(1, 'start is required'),
+  end: z.string().min(1, 'end is required')
+});
+
+module.exports = { reservationSchema };
+
+If you don't want to add zod, you can keep the lightweight checks already in the router, but structured validation yields clearer and consistent messages.
+
+How to integrate the examples
+
+Replace ad-hoc JSON error returns in your routes with throwing HttpError, e.g.:
+throw new HttpError(400, 'INVALID_PAYLOAD', 'start and end required')
+or next(new HttpError(...))
+At the end of app.js (or just before export), use:
+app.use(errorHandler)
+Import and use utils/time.js in routes/reservations.js instead of duplicated helpers.
+Small example of using improvements inside routes/reservations.js (snippet only)
+
+JavaScript
+// inside routes handler
+const { parseRfc3339ToMs, truncateToMinute, isValidInterval, intervalsOverlap, isInPastAtMinute } = require('../utils/time');
+const HttpError = require('../errors/HttpError');
+
+router.post('/rooms/:roomId/reservations', loadRoom, asyncHandler(async (req, res) => {
+  const { start, end } = req.body || {};
+  if (!start || !end) throw new HttpError(400, 'INVALID_PAYLOAD', 'Request body must include "start" and "end"');
+
+  const rawStart = parseRfc3339ToMs(start);
+  const rawEnd = parseRfc3339ToMs(end);
+  if (!isValidInterval(rawStart, rawEnd)) throw new HttpError(400, 'INVALID_INTERVAL', 'end must be after start and both must be valid datetimes');
+
+  const startMs = truncateToMinute(rawStart);
+  const endMs = truncateToMinute(rawEnd);
+  if (!isValidInterval(startMs, endMs)) throw new HttpError(400, 'INVALID_INTERVAL_MINUTE', 'Invalid interval after minute truncation');
+
+  if (isInPastAtMinute(startMs)) throw new HttpError(400, 'START_IN_PAST', 'Reservation start time is in the past');
+
+  if (req.room.reservations.some(r => intervalsOverlap(startMs, endMs, r.startMs, r.endMs))) {
+    throw new HttpError(409, 'CONFLICT_OVERLAP', 'Time conflict with existing reservation');
+  }
+
+  // create and persist...
+}));
+Other practical improvements and recommendations
+
+Validation library:
+
+Add zod or Joi for structured validation; it makes error message formatting and future schema changes easier.
+If you add zod, include it in package.json and update tests accordingly.
+Better test coverage:
+
+Add unit tests for utils/time.js (parse, truncate, overlap).
+Add tests for GET and DELETE endpoints (success, not found).
+Add tests asserting consistent error shape (code, message).
+Use a test that manipulates time deterministically (mock Date.now) to avoid flaky tests.
+ID generation:
+
+Consider using UUIDs (npm uuid) if you want collision resistance and easier merging across processes. Keep numeric ids if you prefer the simplicity; expose setNextReservationId in store for tests that need it.
+Concurrency & persistence:
+
+In-memory store is fine for dev; add a note in README that multi-process deployments will break atomicity.
+For production, use a DB — with Postgres you can use an exclusion constraint on tstzrange to enforce no-overlap at the DB level atomically.
+Logging:
+
+You added morgan — consider making it conditional by environment (disable verbose logs in tests) and add a structured logger (pino/winston) for production.
+Security & limits:
+
+Add helmet(), limit body size (express.json({limit: '10kb'})), and optionally express-rate-limit.
+Validate and limit request body shapes/size to avoid DOS.
+Error response format:
+
+Return machine-friendly codes (e.g., code: 'CONFLICT_OVERLAP') in addition to human message; clients can react programmatically.
+Code style & linting:
+
+Add ESLint + Prettier to enforce style and help readability; create an .eslintrc and pre-commit hook (husky).
+API documentation:
+
+Add OpenAPI/Swagger (e.g., swagger-jsdoc + swagger-ui-express) or a README with example requests/responses.
+File & module organization:
+
+You already moved responsibilities into store/models/routes — this is good. Consider:
+controllers/ for higher-level orchestration (controller calls store + model + validation)
+services/ for business logic (overlap checks, normalization)
+keep routes/ minimal and call controllers
+Suggested quick tasks (small incremental)
+
+Add utils/time.js and update routes to import utils instead of local helpers.
+Add errors/HttpError.js and middleware/errorHandler.js; throw HttpError in routes and mount middleware in app.js.
+Add unit tests for time utilities.
+Add validation (zod) and refactor route validation if desired.
+Add more endpoint tests (GET/DELETE) and test coverage script.
+If you want, I can:
+
+Produce a small patch showing how to modify routes/reservations.js to throw HttpError and use utils/time.js + asyncHandler and show the updated app.js to mount errorHandler.
+Create unit tests for utils/time.js (Jest) and add them to your tests folder.
+Generate a sample OpenAPI YAML for the API.
+Which specific change would you like me to implement now? (e.g., add utils/time.js + update routes, or add centralized error handling and update routes/tests)
+
+## You said:
+Can you help me write a README file to document the API with example requests/responses, how to start and test the API and an explanation of the logic for reserving rooms? The README should be written in Finnish because that is the client's language.
+
+## Copilot said:
+# Simple Room Reservation API (v1)
+
+Tämä projekti on kevyt REST-API huonevarausten hallintaan. Se on tarkoitettu kehitys- ja prototyyppikäyttöön: tiedot pidetään muistissa (in-memory) ja palvelussa on aluksi 10 varattavaa huonetta (id 1–10).
+
+Kieli: JavaScript (Node.js + Express)  
+API-versiointi: /api/v1/...  
+Oletusportti: 3000 (ympäristömuuttuja PORT)
+
+Sisältö
+- Yleiskatsaus
+- Asennus ja käynnistys
+- API-rajapinta (esimerkit)
+- Aikojen formaatti ja varauslogiikka
+- Virheilmoitukset ja HTTP-statukset
+- Testaus
+- Tiedostorakenne & kehityssuositukset
+
+---
+
+## Yleiskatsaus
+
+- 10 huonetta: ID 1..10
+- Jokaisella huoneella oma varauslista (muistissa)
+- Aikojen syöte: RFC 3339 (ISO 8601) -merkkijono (esim. `2026-01-24T15:00:00Z`)
+- Sisäisessä tallennuksessa ajat ovat kokonaislukuja (millisekunteja).
+- Sekunnit ja millisekunnit katkaistaan (truncation) minuutin tarkkuuteen (esim. `15:00:30` -> `15:00:00`) jotta pienet erot eivät aiheuta odottamattomia konflikteja.
+- Varaukset käsitellään puoliavoimina väleinä [start, end) — alkupiste sisältyy, loppupiste ei. Tämä sallii peräkkäiset varaukset siten, että yhden varauksen loppu voi olla täsmälleen seuraavan varauksen alku ilman konfliktia.
+
+---
+
+## Asennus ja käynnistys
+
+1. Hae lähdekoodi ja siirry projektihakemistoon.
+2. Asenna riippuvuudet:
+```bash
+npm install
+```
+3. Kehitystilassa (automaattinen uudelleenkäynnistys nodemonilla):
+```bash
+npm run dev
+```
+4. Tai käynnistä normaali palvelin:
+```bash
+npm start
+```
+Palvelin kuuntelee oletuksena osoitteessa `http://localhost:3000`.
+
+Ympäristömuuttuja:
+- `PORT` — palvelimen portti (oletus 3000)
+
+Lokitus: morgan on aktivoitu (common-format). Lokimerkinnät ilmestyvät konsoliin.
+
+---
+
+## API-rajapinta
+
+Kaikki reitit ovat polun alla `/api/v1`.
+
+Saatavuus: huoneet 1..10 (muista käyttää oikeaa `roomId`-arvoa).
+
+1) Listaa huoneen varaukset
+- GET /api/v1/rooms/:roomId/reservations
+
+Esimerkki:
+```bash
+curl http://localhost:3000/api/v1/rooms/1/reservations
+```
+
+Esimerkkivastaus (200 OK):
+```json
+{
+  "roomId": 1,
+  "reservations": [
+    {
+      "id": 1,
+      "start": "2026-01-25T14:00:00.000Z",
+      "end": "2026-01-25T15:00:00.000Z",
+      "createdAt": "2026-01-20T12:34:56.000Z"
+    }
+  ]
+}
+```
+
+2) Luo varaus
+- POST /api/v1/rooms/:roomId/reservations
+- Body (JSON):
+```json
+{
+  "start": "2026-01-25T14:00:00Z",
+  "end": "2026-01-25T15:00:00Z"
+}
+```
+
+Esimerkki:
+```bash
+curl -X POST http://localhost:3000/api/v1/rooms/1/reservations \
+  -H "Content-Type: application/json" \
+  -d '{"start":"2026-01-25T14:00:00Z","end":"2026-01-25T15:00:00Z"}'
+```
+
+Onnistunut luonti (201 Created):
+```json
+{
+  "message": "Reservation created",
+  "roomId": 1,
+  "reservation": {
+    "id": 1,
+    "start": "2026-01-25T14:00:00.000Z",
+    "end": "2026-01-25T15:00:00.000Z",
+    "createdAt": "2026-01-20T12:34:56.000Z"
+  }
+}
+```
+
+Virhetapaukset (esimerkkejä):
+- Puuttuva `start` tai `end` -> 400 Bad Request
+- Epäkelpo aikamuoto (ei RFC 3339) -> 400 Bad Request
+- `end` ei ole suurempi kuin `start` (loppu ennen alkua tai samat ajat) -> 400 Bad Request
+- Varaus normalisoinnin (minuutti-truncate) jälkeen tulee epäkelvoksi -> 400 Bad Request
+- Varaus alkaa menneisyydessä -> 400 Bad Request
+- Aikatason päällekkäisyys jo olemassa olevan varauksen kanssa -> 409 Conflict
+  - Konfliktivastauksessa palautetaan myös `conflict`-objekti, joka kertoo ristiriitaisen varauksen id:n ja ajat.
+
+Esimerkki päällekkäisyysvastauksesta (409):
+```json
+{
+  "error": "Time conflict with existing reservation",
+  "conflict": {
+    "id": 1,
+    "start": "2026-01-25T14:00:00.000Z",
+    "end": "2026-01-25T15:00:00.000Z"
+  }
+}
+```
+
+3) Poista varaus
+- DELETE /api/v1/rooms/:roomId/reservations/:reservationId
+
+Esimerkki:
+```bash
+curl -X DELETE http://localhost:3000/api/v1/rooms/1/reservations/1
+```
+
+Onnistunut poisto (200 OK):
+```json
+{
+  "message": "Reservation deleted",
+  "roomId": 1,
+  "reservation": {
+    "id": 1,
+    "start": "2026-01-25T14:00:00.000Z",
+    "end": "2026-01-25T15:00:00.000Z",
+    "createdAt": "2026-01-20T12:34:56.000Z"
+  }
+}
+```
+
+Virheet:
+- Huonetta ei löydy -> 404 Not Found
+- Varausta ei löydy -> 404 Not Found
+- Epäkelpo reservationId -> 400 Bad Request
+
+---
+
+## Aikojen formaatti ja varauslogiikka (yksityiskohdat)
+
+- Syöte:
+  - Hyväksytään RFC 3339 / ISO 8601 -muotoiset merkkijonot, esimerkiksi `2026-01-24T15:00:00Z`.
+  - Oletusajat voivat sisältää aikavyöhykkeen (esim. `-05:00`), mutta palvelin normalisoi sisäisesti millisekunteihin. Projektin oletus on, että käyttäjät eivät ole eri aikavyöhykkeiltä; UTC-merkintöjen käyttö on suositeltavaa.
+
+- Sisäinen tallennus:
+  - Muutetaan merkkijonot millisekunneiksi (Number).
+  - Katkaistaan (truncation) sekunnit ja millisekunnit minuutin tarkkuuteen:
+    - Esim. `2026-01-25T14:00:30Z` -> tallennetaan `2026-01-25T14:00:00Z`.
+    - Tämä estää pieniä millisekunti- tai sekuntieroja aiheuttamasta ristiriitoja.
+  - Varaukset tallennetaan muodossa:
+    - { id, startMs, endMs, startIso, endIso, createdAt }
+
+- Varmistettavat säännöt varauksen luomisessa:
+  1. `start` ja `end` täytyy olla kelvollisia aikamerkkijonoja.
+  2. `end` > `start` (ennen tai yhtä suuri ei kelpaa). Tämä tarkistus tehdään sekä ennen että jälkeen minuutti-normalisoinnin — jos normalisointi tekee ajat yhtäsuuriksi, pyyntö hylätään.
+  3. `start` ei voi olla menneisyydessä. Aikavertailu tehdään minuutti-normalisoidun "nyt" -hetken kanssa (eli varaus voi alkaa täsmälleen tällä minuutilla mutta ei ennen).
+  4. Varaukset eivät saa päällekkäistyä saman huoneen muiden varausten kanssa. Käytetty päällekkäistarkistus on periaatteessa:
+     - kaksi väliä A=[aStart,aEnd) ja B=[bStart,bEnd) päällekkäisevät jos:
+       ```
+       aStart < bEnd && bStart < aEnd
+       ```
+     - Tämä sallii peräkkäisyyden, jossa `existing.end === new.start` (ei päällekkäisyys).
+
+- Miksi puoliavoin [start, end)?
+  - Puoliaukia intervallit antavat luonnollisen sallitun "seam"-käyttäytymisen: yhden varauksen loppu voi olla seuraavan varauksen alku ilman konfliktia.
+
+---
+
+## Virheilmoitukset ja status-koodit (yhteenvedoksi)
+
+- 200 OK — Listaus tai poistamisen jälkeen onnistunut vastaus
+- 201 Created — Varauksen luonti onnistui
+- 400 Bad Request — Puuttuvat kentät / väärä formaatti / end <= start / normalisoinnin jälkeinen virhe / start menneisyydessä
+- 404 Not Found — Huonetta tai varausta ei löydy
+- 409 Conflict — Aikakonflikti olemassa olevan varauksen kanssa
+- 500 Internal Server Error — Muut odottamattomat virheet
+
+---
+
+## Testaus
+
+Projekti sisältää Jest + Supertest -testit (polku `tests/`).
+
+Suorita testit:
+```bash
+npm test
+```
+
+Testit resetoivat in-memory-datan (`resetData`) jokaisen testin alussa, joten ne ovat deterministisiä kun aika liittyvät testit käyttävät suhteellisia aikoja (Date.now -perusteiset).
+
+Huom:
+- Älä aja palvelinta samalla portilla kun ajat testejä ellei testit ole konfiguroitu käyttämään erillistä instanssia; testit käyttävät `app`-eksporttia, eivätkä käynnistä HTTP-palvelinta.
+
+---
+
+## Tiedostorakenne (oleellinen)
+- index.js — palvelimen käynnistys, export app+resetData
+- app.js — Express-sovellus ja middleware
+- routes/reservations.js — varausreitit (GET / POST / DELETE)
+- store.js — in-memory data + helperit (init, reset, lisäys/poisto)
+- models/reservation.js — varausobjektin tehdas
+- tests/ — Jest + Supertest -testit
+
+---
+
+## Kehitysehdotuksia / seuraavat askeleet
+
+- Lisää schema-validointi (esim. zod tai Joi) jotta virheilmoitukset ovat selkeämpiä ja muuttuvat helpommin ylläpidettäviksi.
+- Keskitetty virheenkäsittely (HttpError-luokka + error middleware) yhtenäistää vastemuodot.
+- Lisää yksikkötestit ajan käsittelylle (truncate/overlap) erillisinä testeinä.
+- Lisää tuotantotason tallennus: esimerkiksi PostgreSQL ja Postgresin `EXCLUDE`-kontraintit (tstzrange) estämään päällekkäisyydet atomisesti.
+- Turvallisuus: lisää `helmet`, pyydysten rajoitus (rate limiting) ja body-size limitit.
+- Lokitus: harkitse rakenteellista lokitusta (pino tai pino/pino) ja lokin taso konfiguraatiolla (dev/test/prod).
+- Dokumentointi: lisää OpenAPI / Swagger UI kuvaus APIsta.
+
+---
+
+Jos tarvitset, voin:
+- Laatia englanninkielisen version README:sta,
+- Lisätä OpenAPI-specin tai swagger-ui-express -integraation,
+- Toteuttaa ehdotetun keskitetyn virheenkäsittelyratkaisun ja päivittää reitit sen mukaisesti,
+- Auttaa siirtämään validoinnin zodilla.
+
+Kerro mitä haluat seuraavaksi lisätä tai muuttaa.
